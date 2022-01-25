@@ -22,7 +22,7 @@
     'version': "14.0.5.0.0",
     'category': 'Accounting/Localizations',
     'sequence': 14,
-    'author': 'pronexo.com',
+    'author': 'Pronexo',
     'description': """
 
 Funcional

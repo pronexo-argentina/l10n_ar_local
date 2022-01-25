@@ -1,17 +1,39 @@
-# Part of Odoo. See LICENSE file for full copyright and licensing details.
+##############################################################################
+#
+#    Copyright (C) 2007  pronexo.com  (https://www.pronexo.com)
+#    All Rights Reserved.
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Affero General Public License as
+#    published by the Free Software Foundation, either version 3 of the
+#    License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Affero General Public License for more details.
+#
+#    You should have received a copy of the GNU Affero General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+##############################################################################
 from odoo import fields, models, api, _
 from odoo.exceptions import UserError, RedirectWarning
 from odoo.tools.float_utils import float_repr, float_round
 from datetime import datetime
+from io import BytesIO
 from . import afip_errors
-import re
-import logging
-import base64
 import json
-import stdnum
+import base64
+import logging
 
 
 _logger = logging.getLogger(__name__)
+
+try:
+    import qrcode
+except ImportError:
+    qrcode = None
 
 WS_DATE_FORMAT = {'wsfe': '%Y%m%d', 'wsfex': '%Y%m%d', 'wsbfe': '%Y%m%d'}
 
@@ -20,9 +42,18 @@ class AccountMove(models.Model):
 
     _inherit = "account.move"
 
+    l10n_ar_afip_qr_code = fields.Char(
+        compute='_compute_qr_code',
+        string='AFIP QR Code'
+    )
+    l10n_ar_afip_qr_code_img = fields.Binary(
+        compute='_compute_qr_code',
+        string='AFIP QR Code Image'
+    )
+
     l10n_ar_afip_auth_mode = fields.Selection([('CAE', 'CAE'), ('CAI', 'CAI'), ('CAEA', 'CAEA')],
         string='AFIP Authorization Mode', copy=False, readonly=True, states={'draft': [('readonly', False)]},
-        help="This is the type of AFIP Authorization, depending on the way that the invoice is created"
+        help="This is the type of AFIP Authorization, depending of the way that the invoice is created"
         " the mode will change:\n\n"
         " * CAE (Electronic Authorization Code): Means that is an electronic invoice. If you validate a customer invoice"
         " this field will be autofill with CAE option. Also, if you trying to verify in AFIP an electronic vendor bill"
@@ -36,14 +67,10 @@ class AccountMove(models.Model):
     l10n_ar_afip_auth_code = fields.Char('Authorization Code', copy=False, readonly=True, size=24, states={'draft': [('readonly', False)]})
     l10n_ar_afip_auth_code_due = fields.Date(' Authorization Due date', copy=False, readonly=True, states={'draft': [('readonly', False)]},
         help="The Due Date of the Invoice given by AFIP")
-    # TODO l10n_ar_afip_barcode is deprecated since we have the l10n_ar_afip_qr_code, please do not use it anymore.
-    # we do not remove it in order to avoid problems in the stable version but this field is already deleted in master
     l10n_ar_afip_barcode = fields.Char(compute='_compute_l10n_ar_afip_barcode', string='AFIP Barcode',
         help='This barcode is included in the invoice report and is built using the CAE returned by the AFIP when the'
         ' invoice has been validated. This barcode is mandatory by the AFIP in the electronic invoices when this ones'
         ' are printed')
-    l10n_ar_afip_qr_code = fields.Char(compute='_compute_l10n_ar_afip_qr_code', string='AFIP QR Code',
-        help='This QR code is mandatory by the AFIP in the electronic invoices when this ones are printed.')
 
     # electronic invoice fields
     l10n_ar_afip_xml_request = fields.Text(string='AFIP XML Request', copy=False, readonly=True, groups="base.group_system")
@@ -66,47 +93,16 @@ class AccountMove(models.Model):
 
     # Compute methods
 
-    @api.depends('l10n_ar_afip_auth_code', 'l10n_ar_afip_auth_code_due')
+    @api.depends('l10n_ar_afip_auth_code')
     def _compute_l10n_ar_afip_barcode(self):
         """ Method that generates the barcode with the electronic invoice info """
-        sale_moves = self.filtered(lambda x: x.is_sale_document() and x.l10n_ar_afip_auth_code and x.l10n_ar_afip_auth_code_due)
-        for rec in sale_moves:
+        for rec in self:
             barcode = False
-            cae_due = rec.l10n_ar_afip_auth_code_due.strftime('%Y%m%d')
-            barcode = ''.join([str(rec.company_id.partner_id.l10n_ar_vat), "%03d" % int(rec.l10n_latam_document_type_id.code),
-                                "%05d" % rec.journal_id.l10n_ar_afip_pos_number, rec.l10n_ar_afip_auth_code, cae_due])
+            if rec.l10n_ar_afip_auth_code:
+                cae_due = rec.l10n_ar_afip_auth_code_due.strftime('%Y%m%d')
+                barcode = ''.join([str(rec.company_id.partner_id.l10n_ar_vat), "%03d" % int(rec.l10n_latam_document_type_id.code),
+                                   "%05d" % rec.journal_id.l10n_ar_afip_pos_number, rec.l10n_ar_afip_auth_code, cae_due])
             rec.l10n_ar_afip_barcode = barcode
-        (self - sale_moves).l10n_ar_afip_barcode = False
-
-    @api.depends('l10n_ar_afip_auth_code')
-    def _compute_l10n_ar_afip_qr_code(self):
-        """ Method that generates the QR code with the electronic invoice info taking into account RG 4291 """
-        with_qr_code = self.filtered(lambda x: x.l10n_ar_afip_auth_mode in ['CAE', 'CAEA'] and x.l10n_ar_afip_auth_code)
-        for rec in with_qr_code:
-            data = {
-                'ver': 1,
-                'fecha': str(rec.invoice_date),
-                'cuit': int(rec.company_id.partner_id.l10n_ar_vat),
-                'ptoVta': rec.journal_id.l10n_ar_afip_pos_number,
-                'tipoCmp': int(rec.l10n_latam_document_type_id.code),
-                'nroCmp': int(self._l10n_ar_get_document_number_parts(
-                    rec.l10n_latam_document_number, rec.l10n_latam_document_type_id.code)['invoice_number']),
-                'importe': float_round(rec.amount_total, precision_digits=2, rounding_method='DOWN'),
-                'moneda': rec.currency_id.l10n_ar_afip_code,
-                'ctz': float_round(rec.l10n_ar_currency_rate, precision_digits=6, rounding_method='DOWN'),
-                'tipoCodAut': 'E' if rec.l10n_ar_afip_auth_mode == 'CAE' else 'A',
-                'codAut': int(rec.l10n_ar_afip_auth_code),
-            }
-            if rec.commercial_partner_id.vat:
-                data.update({'nroDocRec': rec.commercial_partner_id._get_id_number_sanitize()})
-            if rec.commercial_partner_id.l10n_latam_identification_type_id:
-                data.update({'tipoDocRec': int(rec._get_partner_code_id(rec.commercial_partner_id))})
-            # For more info go to https://www.afip.gob.ar/fe/qr/especificaciones.asp
-            rec.l10n_ar_afip_qr_code = 'https://www.afip.gob.ar/fe/qr/?p=%s' % base64.b64encode(json.dumps(
-                data).encode()).decode('ascii')
-
-        remaining = self - with_qr_code
-        remaining.l10n_ar_afip_qr_code = False
 
     @api.depends('l10n_latam_document_type_id', 'company_id')
     def _compute_l10n_ar_afip_verification_type(self):
@@ -126,10 +122,59 @@ class AccountMove(models.Model):
         return self.company_id._get_environment_type() == 'testing' and \
             not self.company_id.sudo().l10n_ar_afip_ws_crt or not self.company_id.sudo().l10n_ar_afip_ws_key
 
+
+
+    @api.depends('l10n_ar_afip_auth_code')
+    def _compute_qr_code(self):
+        for rec in self:
+            qr_code = False
+            #if rec.afip_auth_code and rec.afip_auth_mode in ['CAE', 'CAEA']:
+            if rec.move_type in ['out_invoice','out_refund'] and rec.state == 'posted' and rec.l10n_ar_afip_auth_code != '':
+                data = {
+                 
+                    "ver": 1,
+                    "fecha": str(rec.invoice_date),
+                    "cuit": int(rec.company_id.partner_id.vat),
+                    "ptoVta": rec.journal_id.l10n_ar_afip_pos_number,
+                    "tipoCm": int(rec.l10n_latam_document_type_id.code),
+                    "nroCmp": int(rec.name.split('-')[2]),
+                    "importe": rec.amount_total,
+                    "moneda": rec.currency_id.l10n_ar_afip_code,
+                    "ctz": rec.l10n_ar_currency_rate,
+                    "tipoDocRec": int(rec.partner_id.l10n_latam_identification_type_id.l10n_ar_afip_code),
+                    "nroDocRec": int(rec.partner_id.vat),
+                    "tipoCodAut": 'E',
+                    "codAut": rec.l10n_ar_afip_auth_code,
+                }
+                qr_code = 'https://www.afip.gob.ar/fe/qr/?p=%s' % base64.b64encode(json.dumps(
+                    data, indent=None).encode('ascii')).decode('ascii')
+
+            rec.l10n_ar_afip_qr_code = qr_code
+            rec.l10n_ar_afip_qr_code_img = rec._make_image_QR(qr_code)
+
+
+    @api.model
+    def _make_image_QR(self, qr_code):
+        """ Generate the required QR code """
+        image = False
+        if qr_code:
+            qr_obj = qrcode.QRCode()
+            output = BytesIO()
+            qr_obj.add_data(qr_code)
+            qr_obj.make(fit=True)
+            qr_img = qr_obj.make_image()
+            qr_img.save(output)
+            image = base64.b64encode(output.getvalue())
+        return image
+
+
+
+
+
     def _post(self, soft=True):
         """ After validate the invoice we then validate in AFIP. The last thing we do is request the cae because if an
         error occurs after CAE requested, the invoice has been already validated on AFIP """
-        ar_invoices = self.filtered(lambda x: x.is_invoice() and x.company_id.country_id.code == "AR")
+        ar_invoices = self.filtered(lambda x: x.is_invoice() and x.company_id.country_id == self.env.ref('base.ar'))
         sale_ar_invoices = ar_invoices.filtered(lambda x: x.move_type in ['out_invoice', 'out_refund'])
         sale_ar_edi_invoices = sale_ar_invoices.filtered(lambda x: x.journal_id.l10n_ar_afip_fe)
 
@@ -338,16 +383,14 @@ class AccountMove(models.Model):
             afip_result = values.get('l10n_ar_afip_result')
             xml_response, xml_request = transport.xml_response, transport.xml_request
             if afip_result not in ['A', 'O']:
-                if not self.env.context.get('l10n_ar_invoice_skip_commit'):
-                    self.env.cr.rollback()
+                self.env.cr.rollback()
                 if inv.exists():
                     # Only save the xml_request/xml_response fields if the invoice exists.
                     # It is possible that the invoice will rollback as well e.g. when it is automatically created when:
                     #   * creating credit note with full reconcile option
                     #   * creating/validating an invoice from subscription/sales
                     inv.sudo().write({'l10n_ar_afip_xml_request': xml_request, 'l10n_ar_afip_xml_response': xml_response})
-                    if not self.env.context.get('l10n_ar_invoice_skip_commit'):
-                        self.env.cr.commit()
+                    self.env.cr.commit()
                 return return_info
             values.update(l10n_ar_afip_xml_request=xml_request, l10n_ar_afip_xml_response=xml_response)
             inv.sudo().write(values)
@@ -375,7 +418,7 @@ class AccountMove(models.Model):
         """
         verification_missing = self.filtered(
             lambda x: x.move_type in ['in_invoice', 'in_refund'] and x.l10n_ar_afip_verification_type == 'required' and
-            x.l10n_latam_document_type_id.country_id.code == "AR" and
+            x.l10n_latam_document_type_id.country_id == self.env.ref('base.ar') and
             x.l10n_ar_afip_verification_result not in ['A', 'O'])
         try:
             verification_missing.l10n_ar_verify_on_afip()
@@ -490,7 +533,7 @@ class AccountMove(models.Model):
                     raise UserError(_('No AFIP code in %s UOM', line.product_id.uom_id.name))
 
                 vat_tax = line.tax_ids.filtered(lambda x: x.tax_group_id.l10n_ar_vat_afip_code)
-                vat_taxes_amounts = vat_tax.with_context(force_sign=line.move_id._get_tax_force_sign()).compute_all(line.price_unit, self.currency_id, line.quantity, product=line.product_id, partner=self.partner_id)
+                vat_taxes_amounts = vat_tax.compute_all(line.price_unit, self.currency_id, line.quantity, product=line.product_id, partner=self.partner_id)
 
                 line.product_id.product_tmpl_id._check_l10n_ar_ncm_code()
                 values.update({'Pro_codigo_ncm': line.product_id.l10n_ar_ncm_code or '',
@@ -513,11 +556,6 @@ class AccountMove(models.Model):
         # We add FCE Is cancellation value only for refund documents
         if self._is_mipyme_fce_refund():
             optionals.append({'Id': 22, 'Valor': self.l10n_ar_afip_fce_is_cancellation and 'S' or 'N'})
-
-        transmission_type = self.env['ir.config_parameter'].sudo().get_param(
-            'l10n_ar_edi.fce_transmission', '')
-        if self._is_mipyme_fce() and transmission_type:
-            optionals.append({'Id': 27, 'Valor': transmission_type})
         return optionals
 
     def _get_partner_code_id(self, partner):
@@ -576,7 +614,6 @@ class AccountMove(models.Model):
             if 'BaseImp' in item and 'Importe' in item:
                 item['BaseImp'] = float_repr(item['BaseImp'], precision_digits=2)
                 item['Importe'] = float_repr(item['Importe'], precision_digits=2)
-        vat = partner_id_code and self.commercial_partner_id.vat and re.sub(r'\D+', '', self.commercial_partner_id.vat)
 
         tributes = self._get_tributes()
         optionals = self._get_optionals_data()
@@ -591,7 +628,7 @@ class AccountMove(models.Model):
                'FeDetReq': [{'FECAEDetRequest': {
                    'Concepto': int(self.l10n_ar_afip_concept),
                    'DocTipo': partner_id_code or 0,
-                   'DocNro': vat and int(vat) or 0,
+                   'DocNro': partner_id_code and int(self.commercial_partner_id.vat) or 0,
                    'CbteDesde': invoice_number,
                    'CbteHasta': invoice_number,
                    'CbteFch': self.invoice_date.strftime(WS_DATE_FORMAT['wsfe']),
@@ -627,7 +664,7 @@ class AccountMove(models.Model):
             msg = _('For "%s" WS the afip code country is mandatory: %s', self.journal_id.l10n_ar_afip_fe, self.commercial_partner_id.country_id.name)
             if hint_msg:
                 msg += '\n\n' + hint_msg
-            raise RedirectWarning(msg, self.env.ref('l10n_ar_edi.action_help_afip').id, _('Go to AFIP page'))
+            raise RedirectWarning(msg, self.env.ref('l10n_ar_afip_fe.action_help_afip').id, _('Go to AFIP page'))
 
         related_invoices = self._get_related_invoice_data()
         vat_country = 0
@@ -711,12 +748,12 @@ class AccountMove(models.Model):
         return res
 
     def _is_argentina_electronic_invoice(self):
-        return bool(self.journal_id.l10n_latam_use_documents and self.env.company.country_id.code == "AR" and self.journal_id.l10n_ar_afip_fe)
+        return bool(self.journal_id.l10n_latam_use_documents and self.env.company.country_id == self.env.ref('base.ar') and self.journal_id.l10n_ar_afip_fe)
 
     def _get_last_sequence_from_afip(self):
         """ Get last number from AFIP, this will be applied only when the account.move state = 'posted' in order to only
         connect to AFIP when the invoice has been posted, in the other case will return a sequence with number 0 """
-        last_number = 0 if self._is_dummy_afip_validation() or self.state != 'posted' else self.journal_id._l10n_ar_get_afip_last_invoice_number(self.l10n_latam_document_type_id)
+        last_number = self.journal_id._l10n_ar_get_afip_last_invoice_number(self.l10n_latam_document_type_id) if self.state == 'posted' else 0
         return "%s %05d-%08d" % (self.l10n_latam_document_type_id.doc_code_prefix, self.journal_id.l10n_ar_afip_pos_number, last_number)
 
     def _get_last_sequence(self, relaxed=False):

@@ -11,10 +11,13 @@
 
         <!-- footer data -->
         <div name="footer_left_column" position="inside">
-            <img t-if="o.l10n_ar_afip_qr_code" t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('QR', o.l10n_ar_afip_qr_code, 400, 400)" alt="QR Code" style="height:100px"/>
+            <!--<img t-if="o.l10n_ar_afip_barcode" t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;humanreadable=1' % ('I2of5', o.l10n_ar_afip_barcode)" alt="Barcode"  style="height:80px"/>-->
+
+
+            <img t-if="o.l10n_ar_afip_barcode" t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s' % ('QR', o.l10n_ar_afip_qr_code, 180, 180)" style="width:110px;height:110px"/>
         </div>
         <div name="pager" position="before">
-            <t t-if="o.journal_id.l10n_ar_afip_pos_system and o.journal_id.l10n_ar_afip_pos_system != 'II_IM'">
+            <t t-if="o.journal_id.l10n_ar_afip_pos_system != 'II_IM'">
                 <div>
                     CAE: <span t-field="o.l10n_ar_afip_auth_code"/>
                 </div>

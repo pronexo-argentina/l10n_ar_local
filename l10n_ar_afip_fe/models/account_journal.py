@@ -1,4 +1,22 @@
-# Part of Odoo. See LICENSE file for full copyright and licensing details.
+##############################################################################
+#
+#    Copyright (C) 2007  pronexo.com  (https://www.pronexo.com)
+#    All Rights Reserved.
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Affero General Public License as
+#    published by the Free Software Foundation, either version 3 of the
+#    License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Affero General Public License for more details.
+#
+#    You should have received a copy of the GNU Affero General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+##############################################################################
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 import logging
@@ -11,7 +29,7 @@ class AccountJournal(models.Model):
     _inherit = 'account.journal'
 
     l10n_ar_afip_fe = fields.Selection(selection='_get_l10n_ar_afip_fe', compute='_compute_l10n_ar_afip_fe',
-                                       string='AFIP WS')
+                                       string='AFIP FE')
 
     def _get_l10n_ar_afip_fe(self):
         return [('wsfe', _('Domestic market -without detail- RG2485 (WSFEv1)')),
@@ -28,13 +46,13 @@ class AccountJournal(models.Model):
 
     @api.depends('l10n_ar_afip_pos_system')
     def _compute_l10n_ar_afip_fe(self):
-        """ Depending on AFIP POS System selected set the proper AFIP WS """
+        """ Depending on AFIP POS System selected set the proper AFIP FE """
         type_mapping = {'RAW_MAW': 'wsfe', 'FEEWS': 'wsfex', 'BFEWS': 'wsbfe'}
         for rec in self:
             rec.l10n_ar_afip_fe = type_mapping.get(rec.l10n_ar_afip_pos_system, False)
 
     def l10n_ar_check_afip_pos_number(self):
-        """ Return information about the AFIP POS numbers related to the given AFIP WS """
+        """ Return information about the AFIP POS numbers related to the given AFIP FE """
         self.ensure_one()
         connection = self.company_id._l10n_ar_get_connection(self.l10n_ar_afip_fe)
         client, auth = connection._get_client()
@@ -53,14 +71,6 @@ class AccountJournal(models.Model):
         :return: integer with the last number register in AFIP for the given document type in this journals AFIP POS
         """
         self.ensure_one()
-
-        # do not access to AFIP web service in test mode
-        # Note:
-        # test mode is enabled only when self.registry.enter_test_mode(cr) is explicitely called.
-        # this is the case for upgrade tests for example, but not for l10n_ar_edi tests.
-        if self.env.registry.in_test_mode():
-            return 0
-
         pos_number = self.l10n_ar_afip_pos_number
         afip_fe = self.l10n_ar_afip_fe
         connection = self.company_id._l10n_ar_get_connection(afip_fe)
@@ -91,7 +101,7 @@ class AccountJournal(models.Model):
             if response.BFEErr.ErrCode != 0 or response.BFEErr.ErrMsg != 'OK':
                 errors = response.BFEErr
         else:
-            return(_('AFIP WS %s not implemented', afip_fe))
+            return(_('AFIP FE %s not implemented', afip_fe))
 
         if errors:
             raise UserError(_('We receive this error trying to consult the last invoice number to AFIP:\n%s', str(errors)))

@@ -1,4 +1,22 @@
-# Part of Odoo. See LICENSE file for full copyright and licensing details.
+##############################################################################
+#
+#    Copyright (C) 2007  pronexo.com  (https://www.pronexo.com)
+#    All Rights Reserved.
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Affero General Public License as
+#    published by the Free Software Foundation, either version 3 of the
+#    License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Affero General Public License for more details.
+#
+#    You should have received a copy of the GNU Affero General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+##############################################################################
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError, ValidationError
 from odoo.modules.module import get_module_resource
@@ -47,7 +65,7 @@ class ResCompany(models.Model):
         with_crt = self.filtered(lambda x: x.l10n_ar_afip_ws_crt)
         remaining = self - with_crt
         for rec in with_crt:
-            certificate = self._l10n_ar_get_certificate_object(rec.with_context(bin_size=False).l10n_ar_afip_ws_crt)
+            certificate = self._l10n_ar_get_certificate_object(rec.l10n_ar_afip_ws_crt)
             rec.l10n_ar_afip_ws_crt_fname = certificate.get_subject().CN
         remaining.l10n_ar_afip_ws_crt_fname = ''
 
@@ -57,7 +75,7 @@ class ResCompany(models.Model):
         for rec in self.filtered('l10n_ar_afip_ws_crt'):
             error = False
             try:
-                content = base64.decodebytes(rec.with_context(bin_size=False).l10n_ar_afip_ws_crt).decode('ascii')
+                content = base64.decodebytes(rec.l10n_ar_afip_ws_crt).decode('ascii')
                 crypto.load_certificate(crypto.FILETYPE_PEM, content)
             except Exception as exc:
                 if 'Expecting: CERTIFICATE' in repr(exc) or "('PEM routines', 'get_name', 'no start line')" in repr(exc):
@@ -74,7 +92,7 @@ class ResCompany(models.Model):
         for rec in self.filtered('l10n_ar_afip_ws_key'):
             error = False
             try:
-                content = base64.decodebytes(rec.with_context(bin_size=False).l10n_ar_afip_ws_key).decode('ascii').strip()
+                content = base64.decodebytes(rec.l10n_ar_afip_ws_key).decode('ascii').strip()
                 crypto.load_privatekey(crypto.FILETYPE_PEM, content)
             except Exception as exc:
                 error = _('Not a valid private key file')
@@ -90,7 +108,7 @@ class ResCompany(models.Model):
     def _l10n_ar_get_afip_crt_expire_date(self):
         """ return afip certificate expire date in datetime.date() """
         self.ensure_one()
-        crt = self.with_context(bin_size=False).l10n_ar_afip_ws_crt
+        crt = self.l10n_ar_afip_ws_crt
         if crt:
             certificate = self._l10n_ar_get_certificate_object(crt)
             datestring = certificate.get_notAfter().decode()
@@ -111,28 +129,28 @@ class ResCompany(models.Model):
             raise UserError(_('AFIP environment not configured for company "%s", please check accounting settings') % (self.name))
         return self.l10n_ar_afip_fe_environment
 
-    def _l10n_ar_get_connection(self, afip_ws):
+    def _l10n_ar_get_connection(self, afip_fe):
         """ Returns the last existing connection with AFIP web service, or creates a new one  (which means login to AFIP
         and save token information in a new connection record in Odoo)
 
         IMPORTANT WARNING: Be careful using this method, when a new connection is created, it will do a cr.commit() """
         self.ensure_one()
-        if not afip_ws:
+        if not afip_fe:
             raise UserError(_('No AFIP WS selected'))
 
         env_type = self._get_environment_type()
-        connection = self.l10n_ar_connection_ids.search([('type', '=', env_type), ('l10n_ar_afip_fe', '=', afip_ws), ('company_id', '=', self.id)], limit=1)
+        connection = self.l10n_ar_connection_ids.search([('type', '=', env_type), ('l10n_ar_afip_fe', '=', afip_fe), ('company_id', '=', self.id)], limit=1)
 
         if connection and connection.expiration_time > fields.Datetime.now():
             return connection
 
-        token_data = connection._l10n_ar_get_token_data(self, afip_ws)
+        token_data = connection._l10n_ar_get_token_data(self, afip_fe)
         if connection:
             connection.sudo().write(token_data)
         else:
-            values = {'company_id': self.id, 'l10n_ar_afip_fe': afip_ws, 'type': env_type}
+            values = {'company_id': self.id, 'l10n_ar_afip_fe': afip_fe, 'type': env_type}
             values.update(token_data)
-            _logger.info('Connection created for company %s %s (%s)' % (self.name, afip_ws, env_type))
+            _logger.info('Connection created for company %s %s (%s)' % (self.name, afip_fe, env_type))
             connection = connection.sudo().create(values)
 
         # This commit is needed because we need to maintain the connection information no matter if the invoices have
@@ -147,8 +165,8 @@ class ResCompany(models.Model):
     def _get_key_and_certificate(self):
         """ Return the pkey and certificate string representations in order to be used. Also raise exception if any key or certificate is not defined """
         self.ensure_one()
-        pkey = base64.decodebytes(self.with_context(bin_size=False).l10n_ar_afip_ws_key) if self.l10n_ar_afip_ws_key else ''
-        cert = base64.decodebytes(self.with_context(bin_size=False).l10n_ar_afip_ws_crt) if self.l10n_ar_afip_ws_crt else ''
+        pkey = base64.decodebytes(self.l10n_ar_afip_ws_key) if self.l10n_ar_afip_ws_key else ''
+        cert = base64.decodebytes(self.l10n_ar_afip_ws_crt) if self.l10n_ar_afip_ws_crt else ''
         res = (pkey, cert)
         if not all(res):
             error = '\n * ' + _(' Missing private key.') if not pkey else ''
@@ -187,7 +205,7 @@ class ResCompany(models.Model):
 
         if not self.l10n_ar_afip_ws_key:
             self._generate_afip_private_key()
-        pkey = base64.decodebytes(self.with_context(bin_size=False).l10n_ar_afip_ws_key)
+        pkey = base64.decodebytes(self.l10n_ar_afip_ws_key)
 
         private_key = crypto.load_privatekey(crypto.FILETYPE_PEM, pkey)
         req.set_pubkey(private_key)
@@ -202,6 +220,6 @@ class ResCompany(models.Model):
         is using the same certificate in another database) """
         for rec in self:
             old = rec.l10n_ar_afip_ws_crt_fname
-            cert_file = get_module_resource('l10n_ar_edi', 'demo', 'cert%d.crt' % random.randint(1, 10))
+            cert_file = get_module_resource('l10n_ar_afip_fe', 'demo', 'cert%d.crt' % random.randint(1, 10))
             rec.l10n_ar_afip_ws_crt = base64.b64encode(open(cert_file, 'rb').read())
             _logger.log(25, 'Setting demo certificate from %s to %s in %s company' % (old, rec.l10n_ar_afip_ws_crt_fname, rec.name))

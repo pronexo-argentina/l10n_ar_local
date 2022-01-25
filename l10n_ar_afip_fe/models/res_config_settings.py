@@ -1,4 +1,22 @@
-# Part of Odoo. See LICENSE file for full copyright and licensing details.
+##############################################################################
+#
+#    Copyright (C) 2007  pronexo.com  (https://www.pronexo.com)
+#    All Rights Reserved.
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Affero General Public License as
+#    published by the Free Software Foundation, either version 3 of the
+#    License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Affero General Public License for more details.
+#
+#    You should have received a copy of the GNU Affero General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+##############################################################################
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 import re
@@ -25,9 +43,7 @@ class ResConfigSettings(models.TransientModel):
             raise UserError(_('The company country must be defined before this action'))
         if not self.company_id.partner_id.l10n_ar_vat:
             raise UserError(_('The company CUIT must be defined before this action'))
-        if not self.company_id.l10n_ar_afip_ws_key:
-            self.company_id._generate_afip_private_key()
-        return {'type': 'ir.actions.act_url', 'url': '/l10n_ar_edi/download_csr/' + str(self.company_id.id), 'target': 'new'}
+        return {'type': 'ir.actions.act_url', 'url': '/l10n_ar_afip_fe/download_afip_csr/' + str(self.company_id.id), 'target': 'new'}
 
     def l10n_ar_connection_test(self):
         self.ensure_one()

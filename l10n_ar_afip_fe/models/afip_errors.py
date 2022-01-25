@@ -1,3 +1,22 @@
+##############################################################################
+#
+#    Copyright (C) 2007  pronexo.com  (https://www.pronexo.com)
+#    All Rights Reserved.
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Affero General Public License as
+#    published by the Free Software Foundation, either version 3 of the
+#    License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Affero General Public License for more details.
+#
+#    You should have received a copy of the GNU Affero General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+##############################################################################
 from odoo import _, _lt
 
 WSFE_ERRORS = {
@@ -18,7 +37,6 @@ WSFE_ERRORS = {
     '10051': _lt('Could happen that the VAT is calculated without the discount, then it throws another amount.'),
     '10162': _lt('You may not have completed the Bank Account field on the invoice'),
     '10180': _lt('Please check the next conditions:\n    * Review that the invoice total invoice is greater than the amount defined by AFIP for this type of document\n    * Review that the customer is a MiPYME'),
-    '10216': _lt('The new RG 4919/2021 define that MiPYME document requires to inform the FCE Transmission Option. Set this one in your System Parameters creating a parameter with name "l10n_ar_edi.fce_transmission". Possible values are: SCA or ADC. These options means:\n * SCA - TRANSFERENCIA AL SISTEMA DE CIRCULACION ABIERTA\n * ADC - AGENTE DE DEPOSITO COLECTIVO'),
 }
 
 WSFEX_ERRORS = {
@@ -57,20 +75,20 @@ ERRORS = {
     }
 }
 
-def _hint_msg(error_code, afipws):
+def _hint_msg(error_code, afip_fe):
     """Get explanation and/or hints on errors returned by wsfe webservice.
 
     :param str error_code:
-    :param str afipws: webservice (wsfe|wsfex|wbsfe)
+    :param str afip_fe: webservice (wsfe|wsfex|wbsfe)
     :rtype: str
     """
-    if afipws == 'wsfe' and error_code in WSFE_ERRORS:
+    if afip_fe == 'wsfe' and error_code in WSFE_ERRORS:
         return str(WSFE_ERRORS.get(error_code))
 
-    elif afipws == 'wsfex' and error_code in WSFEX_ERRORS:
+    elif afip_fe == 'wsfex' and error_code in WSFEX_ERRORS:
         return str(WSFEX_ERRORS.get(error_code))
 
-    elif afipws == 'wsbfe' and error_code in WBSFE_ERRORS:
+    elif afip_fe == 'wsbfe' and error_code in WBSFE_ERRORS:
         return str(WBSFE_ERRORS.get(error_code))
 
     elif error_code in ERRORS:

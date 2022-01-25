@@ -32,9 +32,6 @@
                                     <span attrs="{'invisible': [('l10n_ar_afip_ws_crt','!=', False)]}"> or</span>
                                     <button name="l10n_ar_action_create_certificate_request" type="object" class="oe_link oe_inline" string="⇒ Generate Request" attrs="{'invisible': [('l10n_ar_afip_ws_crt','!=', False)]}" help="Click here to create a Resquest Certificate file. This file need to be uploaded to your AFIP Portal in order to ask AFIP for a certificate"/>
                                 </div>
-                                <div class="mt16">
-                                    <button name="l10n_ar_connection_test" type="object" class="oe_link oe_inline" string="⇒ Test Connections"/>
-                                </div>
                                 <div class="mt16" attrs="{'invisible': [('l10n_ar_afip_ws_crt','=', False)]}">
                                     <button name="l10n_ar_action_create_certificate_request" type="object" class="oe_link oe_inline" string="Generate Renewal Request"/>
                                 </div>
